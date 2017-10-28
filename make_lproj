@@ -1,0 +1,132 @@
+#!/bin/sh -e
+
+makeOneLproj()  {
+#sourcepath是指无翻译的文件
+#destpath是指带翻译的文件
+local sourcepath="$1"
+local destpath="$2"
+
+local dest_content=""
+local backup_content=""
+
+set -f
+
+if [ ! "$sourcepath" = "" ] 
+	then
+	if [ ! "$destpath" = "" ] 
+	then
+		if [ -f $destpath ]
+		then
+            local testUTF8=$(file $destpath)
+            if [[ $testUTF8 =~ "UTF-8" ]]
+                then
+                    dest_content=$(cat $destpath)
+                else
+                    dest_content=$(iconv -f UTF-16LE -t utf8 $destpath)
+            fi
+            testUTF8=$(file $sourcepath)
+            if [[ $testUTF8 =~ "UTF-8" ]]
+                then
+                    backup_content=$(cat $sourcepath)
+                else
+                    backup_content=$(iconv -f UTF-16LE -t utf8 $sourcepath)
+            fi
+			
+        else
+        	cp $sourcepath $destpath
+            echo "done $destpath"
+        	return;
+		fi
+        
+    else
+    	echo "no dest file setted!"
+	    exit;
+    fi
+else
+	echo "no source file setted!"
+	exit;
+fi
+
+local linecount=$(echo "$dest_content" | awk 'END{ print NR }')
+
+echo "destpath line="$linecount
+
+
+for((i=1;i<=$linecount;i++));do 
+
+echo "line="$i
+
+local linecontent=$(echo "$dest_content" | sed -n "$i"'p')
+local linecontent1=$linecontent
+
+local matchedcontent=$(echo "$linecontent1" | awk '/^\"(([\\\\][\"])|[^\"])*\"[ ]*=[ ]*\"(([\\\\][\"])|[^\"])*\"[ ]*;$/')
+
+local list=$(echo "$linecontent" | sed  's/\(^\".*[^\\\\]\"\)[ ]*=[ ]*\(\".*[^\\\\]\"\)[ ]*;/\1\\n\2/')
+
+local key=""
+local value=""
+
+if [ ! "$matchedcontent" = "" ] 
+	then
+    key=$(echo "$list" | sed -n "1p" )
+    value=$(echo "$list" | sed -n "2p" )
+
+    echo "key=  "$key
+    echo "value=  "$value
+
+    local realline=$(echo "$backup_content" | sed -n '/'"$key"'[ ]*=/=')
+    if [ ! "$realline" = "" ] 
+    then
+        backup_content=$(echo "$backup_content" | sed "$realline"'s/.*/'"$key"' = '"$value"';/')
+    fi
+fi
+
+done
+
+echo "$backup_content" > $destpath
+
+echo "done $destpath"
+
+set +f
+
+}
+
+script_basepath=$(cd `dirname $0`; pwd)
+
+sourceFile=$1
+
+if [ ! "$sourceFile" = "" ] 
+then
+    if [ ! -f $sourceFile ]
+        then
+            echo "no source file exsit!"
+            exit;
+    fi
+else
+    echo "no source file setted!"
+    exit;
+fi
+
+parent_sourcePath=$(cd `dirname $sourceFile`; pwd)
+parent_sourcePath=$(cd `dirname $parent_sourcePath`; pwd)
+sourceFileName=$(basename $sourceFile)
+
+
+index=1
+for p in "$@"
+do
+    if [ ! $index -eq 1 ]
+    then
+        parent_destPath=$parent_sourcePath"/"$p".lproj"
+        if [ ! -d $parent_destPath ]
+        then
+            mkdir $parent_destPath
+        fi
+        destFile=$parent_destPath"/"$sourceFileName
+        echo "begin make "$destFile
+        makeOneLproj $sourceFile $destFile
+    fi
+    index=$(expr $index + 1)
+done
+
+
